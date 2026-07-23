@@ -1,5 +1,5 @@
 //! Logging module.
-use std::{io, time::SystemTime};
+use std::io;
 
 use chrono::prelude::*;
 use colored::*;
