@@ -639,6 +639,13 @@ impl<W: Waker> handle::Handle for Handle<W> {
         receive.recv()?.map_err(handle::Error::Command)
     }
 
+    fn mempool(&self) -> Result<Vec<Transaction>, handle::Error> {
+        let (transmit, receive) = chan::bounded(1);
+        self.command(Command::GetMempool(transmit))?;
+
+        Ok(receive.recv()?)
+    }
+
     fn wait<F, T>(&self, f: F) -> Result<T, handle::Error>
     where
         F: FnMut(fsm::Event) -> Option<T>,
