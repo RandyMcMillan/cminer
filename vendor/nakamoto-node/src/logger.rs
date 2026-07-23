@@ -37,8 +37,7 @@ impl Log for Logger {
                 writeln!(
                     stream,
                     "{} {}",
-                    DateTime::from(SystemTime::now())
-                        .to_rfc3339_opts(SecondsFormat::Millis, true)
+                    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
                         .white(),
                     message,
                 )
