@@ -539,6 +539,11 @@ impl<U: Wire<Event> + SetTimer, C: Clock> InventoryManager<U, C> {
         addrs
     }
 
+    /// Get a snapshot of the current local mempool.
+    pub fn mempool(&self) -> Vec<Transaction> {
+        self.mempool.values().cloned().collect()
+    }
+
     /// Attempt to get a block from the network. Retries if necessary.
     pub fn get_block(&mut self, hash: BlockHash) {
         log::debug!("Queueing block {hash} to be requested");
