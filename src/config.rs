@@ -1,4 +1,5 @@
 use nonblock_logger::log::LevelFilter::{self, *};
+use nonblock_logger::log::Level;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Currency {
@@ -31,9 +32,42 @@ impl Default for Currency {
     }
 }
 
+#[derive(clap::Parser, Debug, Clone)]
+pub struct NakamotoNodeArgs {
+    #[clap(long = "nakamoto-connect")]
+    pub connect: Vec<SocketAddr>,
+    #[clap(long = "nakamoto-listen")]
+    pub listen: Vec<SocketAddr>,
+    #[clap(long = "nakamoto-testnet")]
+    pub nakamoto_testnet: bool,
+    #[clap(short = '4', long = "nakamoto-ipv4")]
+    pub ipv4: bool,
+    #[clap(short = '6', long = "nakamoto-ipv6")]
+    pub ipv6: bool,
+    #[clap(long = "nakamoto-log", default_value = "info")]
+    pub log: Level,
+    #[clap(long = "nakamoto-root")]
+    pub root: Option<PathBuf>,
+}
+
+impl Default for NakamotoNodeArgs {
+    fn default() -> Self {
+        Self {
+            connect: Vec::new(),
+            listen: Vec::new(),
+            nakamoto_testnet: false,
+            ipv4: false,
+            ipv6: false,
+            log: Level::Info,
+            root: None,
+        }
+    }
+}
+
 use std::{
     fmt,
     net::{SocketAddr, ToSocketAddrs},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -81,6 +115,8 @@ pub struct Config {
     pub sleep: u64,
     #[clap(short, long, help = "the domain for enable tls [An empty domain name means skipping the verify]")]
     pub domain: Option<String>,
+    #[clap(flatten)]
+    pub nakamoto: NakamotoNodeArgs,
 }
 
 impl Config {
@@ -108,6 +144,7 @@ impl Config {
             sleep: 0,
             expire: 100,
             domain: None,
+            nakamoto: NakamotoNodeArgs::default(),
             pool: pool.as_ref().parse().expect("resolve name failed"),
             currency: Currency::from_str(currency.as_ref(), true).unwrap_or(Currency::Btc),
             user: user.into(),
