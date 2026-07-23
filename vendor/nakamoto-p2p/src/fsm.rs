@@ -279,6 +279,8 @@ pub enum Command {
         Transaction,
         chan::Sender<Result<NonEmpty<PeerId>, CommandError>>,
     ),
+    /// Get the current local mempool snapshot.
+    GetMempool(chan::Sender<Vec<Transaction>>),
 }
 
 impl fmt::Debug for Command {
@@ -303,6 +305,7 @@ impl fmt::Debug for Command {
             Self::ImportHeaders(_headers, _) => write!(f, "ImportHeaders(..)"),
             Self::ImportAddresses(addrs) => write!(f, "ImportAddresses({:?})", addrs),
             Self::SubmitTransaction(tx, _) => write!(f, "SubmitTransaction({:?})", tx),
+            Self::GetMempool(_) => write!(f, "GetMempool"),
         }
     }
 }
@@ -742,6 +745,9 @@ impl<T: BlockTree, F: Filters, P: peer::Store, C: AdjustedClock<PeerId>> StateMa
                 } else {
                     reply.send(Err(CommandError::NotConnected)).ok();
                 }
+            }
+            Command::GetMempool(reply) => {
+                reply.send(self.invmgr.mempool()).ok();
             }
             Command::Rescan { from, to, watch } => {
                 // A rescan with a new watch list may return matches on cached filters.
