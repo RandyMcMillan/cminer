@@ -1,3 +1,4 @@
+use clap::{Args, Parser, Subcommand};
 use nonblock_logger::log::LevelFilter::{self, *};
 use nonblock_logger::log::Level;
 
@@ -32,38 +33,6 @@ impl Default for Currency {
     }
 }
 
-#[derive(clap::Parser, Debug, Clone)]
-pub struct NakamotoNodeArgs {
-    #[clap(long = "nakamoto-connect", help = "connect to the specified peers only")]
-    pub connect: Vec<SocketAddr>,
-    #[clap(long = "nakamoto-listen", help = "listen on one of these addresses for peer connections")]
-    pub listen: Vec<SocketAddr>,
-    #[clap(long = "nakamoto-testnet", help = "use the bitcoin test network")]
-    pub nakamoto_testnet: bool,
-    #[clap(short = '4', long = "nakamoto-ipv4", help = "only connect to IPv4 addresses")]
-    pub ipv4: bool,
-    #[clap(short = '6', long = "nakamoto-ipv6", help = "only connect to IPv6 addresses")]
-    pub ipv6: bool,
-    #[clap(long = "nakamoto-log", default_value = "info", help = "log level")]
-    pub log: Level,
-    #[clap(long = "nakamoto-root", help = "root directory for nakamoto files")]
-    pub root: Option<PathBuf>,
-}
-
-impl Default for NakamotoNodeArgs {
-    fn default() -> Self {
-        Self {
-            connect: Vec::new(),
-            listen: Vec::new(),
-            nakamoto_testnet: false,
-            ipv4: false,
-            ipv6: false,
-            log: Level::Info,
-            root: None,
-        }
-    }
-}
-
 use std::{
     fmt,
     net::{SocketAddr, ToSocketAddrs},
@@ -91,8 +60,7 @@ impl std::str::FromStr for PoolAddr {
     }
 }
 
-#[derive(clap::Parser, Debug, Clone)]
-#[clap(version = env!("CARGO_PKG_VERSION"))]
+#[derive(Args, Debug, Clone)]
 pub struct Config {
     #[clap(short, long, help = "The address of pool: Host/IP:port")]
     pub pool: PoolAddr,
@@ -115,8 +83,37 @@ pub struct Config {
     pub sleep: u64,
     #[clap(short, long, help = "the domain for enable tls [An empty domain name means skipping the verify]")]
     pub domain: Option<String>,
-    #[clap(flatten)]
-    pub nakamoto: NakamotoNodeArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct NakamotoConfig {
+    #[clap(long, help = "connect to the specified peers only")]
+    pub connect: Vec<SocketAddr>,
+    #[clap(long, help = "listen on one of these addresses for peer connections")]
+    pub listen: Vec<SocketAddr>,
+    #[clap(long, help = "use the bitcoin test network")]
+    pub testnet: bool,
+    #[clap(short = '4', long, help = "only connect to IPv4 addresses")]
+    pub ipv4: bool,
+    #[clap(short = '6', long, help = "only connect to IPv6 addresses")]
+    pub ipv6: bool,
+    #[clap(long, default_value = "info", help = "log level")]
+    pub log: Level,
+    #[clap(long, help = "root directory for nakamoto files")]
+    pub root: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug, Clone)]
+#[clap(version = env!("CARGO_PKG_VERSION"))]
+pub struct Cli {
+    #[clap(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum Command {
+    Miner(Config),
+    Nakamoto(NakamotoConfig),
 }
 
 impl Config {
@@ -144,7 +141,6 @@ impl Config {
             sleep: 0,
             expire: 100,
             domain: None,
-            nakamoto: NakamotoNodeArgs::default(),
             pool: pool.as_ref().parse().expect("resolve name failed"),
             currency: Currency::from_str(currency.as_ref(), true).unwrap_or(Currency::Btc),
             user: user.into(),

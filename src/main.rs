@@ -14,6 +14,9 @@ use nonblock_logger::{
     BaseFilter, BaseFormater, FixedLevel, NonblockLogger,
 };
 
+use nakamoto::client::Network;
+use nakamoto::node::{logger as nakamoto_logger, Domain};
+
 pub fn format(base: &BaseFormater, record: &Record) -> String {
     let level = FixedLevel::with_color(record.level(), base.color_get()).length(base.level_get()).into_colored().into_coloredfg();
 
@@ -34,7 +37,28 @@ pub fn format(base: &BaseFormater, record: &Record) -> String {
 fn main() {
     use clap::Parser;
 
-    let config = Config::parse().fix_workers();
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Miner(config) => run_miner(config.fix_workers()),
+        Command::Nakamoto(config) => run_nakamoto(config),
+    }
+}
+
+pub mod config;
+pub mod miner;
+pub mod reqs;
+pub mod state;
+pub mod util;
+
+pub mod btc;
+pub mod ckb;
+pub mod eth;
+pub mod kas;
+
+use crate::config::{Cli, Command, Config, Currency::*, NakamotoConfig};
+use crate::{btc::BtcJob, ckb::CkbJob, eth::EthJob, kas::KasJob};
+
+fn run_miner(config: Config) {
     let pkg = env!("CARGO_PKG_NAME");
     let log = config.log();
     println!("{}: {:?}, {:?}", pkg, log, config);
@@ -59,28 +83,35 @@ fn main() {
 
     util::catch_ctrlc();
 
-    fun(config)
-}
-
-pub mod config;
-pub mod miner;
-pub mod reqs;
-pub mod state;
-pub mod util;
-
-pub mod btc;
-pub mod ckb;
-pub mod eth;
-pub mod kas;
-
-use crate::config::{Config, Currency::*};
-use crate::{btc::BtcJob, ckb::CkbJob, eth::EthJob, kas::KasJob};
-
-fn fun(config: Config) {
     match config.currency {
         Btc => miner::fun::<BtcJob>(config),
         Ckb => miner::fun::<CkbJob>(config),
         Eth => miner::fun::<EthJob>(config),
         Kas => miner::fun::<KasJob>(config),
+    }
+}
+
+fn run_nakamoto(config: NakamotoConfig) {
+    nakamoto_logger::init(config.log).expect("initializing logger for the first time");
+
+    let network = if config.testnet {
+        Network::Testnet
+    } else {
+        Network::Mainnet
+    };
+
+    let domains = if config.ipv4 && config.ipv6 {
+        vec![Domain::IPV4, Domain::IPV6]
+    } else if config.ipv4 {
+        vec![Domain::IPV4]
+    } else if config.ipv6 {
+        vec![Domain::IPV6]
+    } else {
+        vec![Domain::IPV4, Domain::IPV6]
+    };
+
+    if let Err(e) = nakamoto::node::run(&config.connect, &config.listen, config.root, &domains, network) {
+        eprintln!("node: Exiting: {}", e);
+        std::process::exit(1);
     }
 }
