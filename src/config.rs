@@ -64,7 +64,7 @@ pub struct Config {
     pub pool: PoolAddr,
     #[clap(short, long, default_value = "128", help = "Default is NumCPUs, if arg bigger than it, will reset as it")]
     pub workers: usize,
-    #[clap(arg_enum, default_value_t, ignore_case = true, short, long, default_value = "ckb")]
+    #[clap(arg_enum, default_value_t, ignore_case = true, short, long, default_value = "btc")]
     #[clap(help = "Currency")]
     pub currency: Currency,
     #[clap(short, long, help = "enable testnet(work for ckb testnet and etchash(ecip-1099))")]
@@ -109,7 +109,7 @@ impl Config {
             expire: 100,
             domain: None,
             pool: pool.as_ref().parse().expect("resolve name failed"),
-            currency: Currency::from_str(currency.as_ref(), true).unwrap_or(Currency::Ckb),
+            currency: Currency::from_str(currency.as_ref(), true).unwrap_or(Currency::Btc),
             user: user.into(),
             rig: rig.into(),
         }
