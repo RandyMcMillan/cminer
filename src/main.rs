@@ -53,6 +53,7 @@ pub mod util;
 pub mod btc;
 pub mod ckb;
 pub mod eth;
+pub mod nakamoto;
 pub mod kas;
 
 use crate::config::{Cli, Command, Config, Currency::*, NakamotoConfig};
