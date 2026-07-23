@@ -1,5 +1,5 @@
 //! Logging module.
-use std::{io, time::SystemTime};
+use std::io;
 
 use chrono::prelude::*;
 use log::{Level, Log, Metadata, Record, SetLoggerError};
@@ -19,8 +19,7 @@ impl Log for Logger {
             write(record, &self.stream);
 
             fn write(record: &log::Record, mut stream: impl io::Write) {
-                let now =
-                    DateTime::from(SystemTime::now()).to_rfc3339_opts(SecondsFormat::Millis, true);
+                let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
                 writeln!(stream, "{} {}", now, record.args()).expect("write shouldn't fail");
             }
         }
