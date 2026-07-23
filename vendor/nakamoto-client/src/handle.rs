@@ -140,6 +140,8 @@ pub trait Handle: Sized + Send + Sync + Clone {
     ///
     /// Returns the peer(s) the transaction was announced to, or an error if no peers were found.
     fn submit_transaction(&self, tx: Transaction) -> Result<NonEmpty<net::SocketAddr>, Error>;
+    /// Get a snapshot of the current local mempool.
+    fn mempool(&self) -> Result<Vec<Transaction>, Error>;
     /// Import block headers into the node.
     /// This may cause the node to broadcast header or inventory messages to its peers.
     fn import_headers(
