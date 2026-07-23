@@ -58,3 +58,7 @@ tokio-rustls = { version = "0.22", features = ["dangerous_configuration"] }
 webpki-roots = "0.21"
 url = "2.2"
 nakamoto = { version = "0.4.0", features = ["nakamoto-node", "nakamoto-test", "nakamoto-wallet"] }
+
+[patch.crates-io]
+nakamoto-node = { path = "vendor/nakamoto-node" }
+nakamoto-wallet = { path = "vendor/nakamoto-wallet" }
