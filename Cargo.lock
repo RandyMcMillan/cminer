@@ -428,6 +428,9 @@ dependencies = [
  "hex",
  "kaspow",
  "nakamoto",
+ "nakamoto-client",
+ "nakamoto-common",
+ "nakamoto-node",
  "nonblock-logger",
  "num_cpus",
  "openssl",
@@ -1267,8 +1270,6 @@ dependencies = [
 [[package]]
 name = "nakamoto-client"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2df3e1470f5c8bef37a47e23bb8c0d2858a7bd5eb3e4177474b09b30912ba7c"
 dependencies = [
  "crossbeam-channel",
  "fastrand",
@@ -1340,8 +1341,6 @@ dependencies = [
 [[package]]
 name = "nakamoto-p2p"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c22f70ce4e64ecf43649d3b53879d3ca634cf8bb12a42caed407138c705a9e72"
 dependencies = [
  "crossbeam-channel",
  "fastrand",

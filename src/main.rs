@@ -14,8 +14,8 @@ use nonblock_logger::{
     BaseFilter, BaseFormater, FixedLevel, NonblockLogger,
 };
 
-use nakamoto::client::Network;
-use nakamoto::node::{logger as nakamoto_logger, Domain};
+use nakamoto_client::Network;
+use nakamoto_node::{logger as nakamoto_logger, Domain};
 
 pub fn format(base: &BaseFormater, record: &Record) -> String {
     let level = FixedLevel::with_color(record.level(), base.color_get()).length(base.level_get()).into_colored().into_coloredfg();
@@ -111,7 +111,7 @@ fn run_nakamoto(config: NakamotoConfig) {
         vec![Domain::IPV4, Domain::IPV6]
     };
 
-    if let Err(e) = nakamoto::node::run(&config.connect, &config.listen, config.root, &domains, network) {
+    if let Err(e) = nakamoto_node::run(&config.connect, &config.listen, config.root, &domains, network) {
         eprintln!("node: Exiting: {}", e);
         std::process::exit(1);
     }
