@@ -168,6 +168,18 @@ impl Computer {
     pub fn update_block(&mut self, block: &Block) {
         self.update_header(&block.header);
     }
+    pub fn compute_target(&mut self, target: Uint256, nonce: u32) -> Option<Solution> {
+        let bytes = &mut self.bytes;
+        (&mut bytes[76..]).copy_from_slice(&nonce.to_le_bytes());
+
+        let hashraw = sha256d(bytes);
+        let found = target_uint256_from_hashraw(hashraw);
+        if found <= target {
+            return Some(Solution { target: found, nonce, id: atomic_id() });
+        }
+
+        None
+    }
     pub fn update(&mut self, job: &Job) {
         let nonce1 = decode(&job.nonce1).unwrap();
         let nonce2 = job.nonce2_bytes();
@@ -193,17 +205,46 @@ impl Computer {
 
     #[inline]
     pub fn compute(&mut self, job: &Job, nonce: u32) -> Option<Solution> {
-        let bytes = &mut self.bytes;
-        (&mut bytes[76..]).copy_from_slice(&nonce.to_le_bytes());
-
-        let hashraw = sha256d(bytes);
-        let target = target_uint256_from_hashraw(hashraw);
-        if target <= job.target {
-            return Some(Solution { target, nonce, id: atomic_id() });
-        }
-
-        None
+        self.compute_target(job.target, nonce)
     }
+}
+
+pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::thread;
+
+    let workers = workers.max(1);
+    let target = block.header.target();
+    let block = Arc::new(block);
+    let found = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    for idx in 0..workers {
+        let block = Arc::clone(&block);
+        let found = Arc::clone(&found);
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let mut computer = Computer::new();
+            computer.update_block(&block);
+            let mut nonce = idx as u32;
+            while !found.load(Ordering::Relaxed) {
+                if let Some(solution) = computer.compute_target(target, nonce) {
+                    found.store(true, Ordering::Relaxed);
+                    let mut solved = (*block).clone();
+                    solved.header.nonce = solution.nonce;
+                    let _ = tx.send(solved);
+                    return;
+                }
+                nonce = nonce.wrapping_add(workers as u32);
+            }
+        });
+    }
+
+    drop(tx);
+    rx.recv().ok()
 }
 
 #[cfg(any(feature = "btc-openssl"))]
