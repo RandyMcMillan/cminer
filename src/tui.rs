@@ -48,6 +48,7 @@ struct App {
     selected_peer: usize,
     log_scroll: u16,
     node: NodeState,
+    self_peer: PeerRow,
     peer_rows: HashMap<net::SocketAddr, PeerRow>,
     miner: MinerState,
 }
@@ -72,6 +73,7 @@ impl Default for App {
             selected_peer: 0,
             log_scroll: 0,
             node: NodeState::default(),
+            self_peer: PeerRow::self_row(),
             peer_rows: HashMap::new(),
             miner: MinerState::default(),
         }
@@ -86,12 +88,27 @@ struct NodeState {
 
 #[derive(Clone)]
 struct PeerRow {
+    self_node: bool,
     addr: net::SocketAddr,
     link: Option<nakamoto_client::Link>,
     height: Option<String>,
     services: Option<ServiceFlags>,
     user_agent: Option<String>,
     version: Option<u32>,
+}
+
+impl PeerRow {
+    fn self_row() -> Self {
+        Self {
+            self_node: true,
+            addr: net::SocketAddr::from(([0, 0, 0, 0], 0)),
+            link: None,
+            height: None,
+            services: None,
+            user_agent: Some(format!("/Gnostr:{}/", env!("CARGO_PKG_VERSION"))),
+            version: None,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -350,6 +367,7 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                         .entry(addr)
                         .and_modify(|peer| peer.link = Some(link))
                         .or_insert(PeerRow {
+                            self_node: false,
                             addr,
                             link: Some(link),
                             height: None,
@@ -370,6 +388,7 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                     app.peer_rows.insert(
                         addr,
                         PeerRow {
+                            self_node: false,
                             addr,
                             link: Some(link),
                             height: Some(height),
@@ -514,10 +533,14 @@ fn draw_peers(frame: &mut Frame<'_>, area: Rect, app: &App) {
             .iter()
             .enumerate()
             .map(|(idx, peer)| {
-                let direction = match peer.link {
-                    Some(link) if link.is_outbound() => "out",
-                    Some(_) => "in ",
-                    None => "??",
+                let direction = if peer.self_node {
+                    "self"
+                } else {
+                    match peer.link {
+                        Some(link) if link.is_outbound() => "out",
+                        Some(_) => "in ",
+                        None => "??",
+                    }
                 };
                 ListItem::new(format!("{} {}", direction, peer.addr))
                 .style(if idx == app.selected_peer {
@@ -541,6 +564,7 @@ fn draw_peers(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let text = if let Some(peer) = peers.get(app.selected_peer) {
         vec![
             format!("addr: {}", peer.addr),
+            format!("node: {}", if peer.self_node { "self" } else { "remote" }),
             format!(
                 "link: {}",
                 peer
@@ -608,6 +632,7 @@ fn merge_peer_snapshot(rows: &mut HashMap<net::SocketAddr, PeerRow>, peers: Vec<
         rows.insert(
             peer.addr,
             PeerRow {
+                self_node: false,
                 addr: peer.addr,
                 link: Some(peer.link),
                 height: Some(peer.height.to_string()),
@@ -620,8 +645,10 @@ fn merge_peer_snapshot(rows: &mut HashMap<net::SocketAddr, PeerRow>, peers: Vec<
 }
 
 fn peer_rows_sorted(app: &App) -> Vec<PeerRow> {
-    let mut rows = app.peer_rows.values().cloned().collect::<Vec<_>>();
-    rows.sort_by_key(|row| row.addr);
+    let mut rows = Vec::with_capacity(app.peer_rows.len() + 1);
+    rows.push(app.self_peer.clone());
+    rows.extend(app.peer_rows.values().cloned());
+    rows.sort_by_key(|row| (row.self_node, row.addr));
     rows
 }
 
