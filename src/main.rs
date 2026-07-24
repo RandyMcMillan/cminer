@@ -16,6 +16,7 @@ use nonblock_logger::{
 
 use nakamoto_client::Network;
 use nakamoto_node::{logger as nakamoto_logger, Domain};
+use std::{net, thread};
 
 pub fn format(base: &BaseFormater, record: &Record) -> String {
     let level = FixedLevel::with_color(record.level(), base.color_get()).length(base.level_get()).into_colored().into_coloredfg();
@@ -111,8 +112,36 @@ fn run_nakamoto(config: NakamotoConfig) {
         vec![Domain::IPV4, Domain::IPV6]
     };
 
-    if let Err(e) = nakamoto_node::run(&config.connect, &config.listen, config.root, &domains, network) {
-        eprintln!("node: Exiting: {}", e);
-        std::process::exit(1);
+    type Reactor = nakamoto_net_poll::Reactor<net::TcpStream>;
+
+    let mut node_config = nakamoto_node::Config::new(network);
+    node_config.connect = config.connect;
+    node_config.listen = if config.listen.is_empty() {
+       vec![([0, 0, 0, 0], 0).into()]
+    } else {
+       config.listen
+    };
+    node_config.domains = domains;
+    node_config.root = config.root.unwrap_or(node_config.root);
+
+    let client = nakamoto_node::Client::<Reactor>::new().expect("create nakamoto client");
+    let handle = client.handle();
+    let _node_thread = thread::spawn(move || {
+       if let Err(e) = client.run(node_config) {
+           eprintln!("node: Exiting: {}", e);
+       }
+    });
+
+    let block = crate::nakamoto::build_candidate_block(&handle).expect("build candidate block");
+    println!("candidate block txs: {}", block.txdata.len());
+
+    let found = btc::pow::mine_block(block, num_cpus::get());
+    if let Some(solved) = found {
+       println!(
+           "mined block {} with nonce {}",
+           solved.block_hash(),
+           solved.header.nonce
+       );
     }
+
 }
