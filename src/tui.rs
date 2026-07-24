@@ -18,7 +18,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     prelude::{Frame, Line, Style},
-    widgets::{Block as TBlock, Borders, Clear, List, ListItem, Paragraph, Tabs},
+    widgets::{Block as TBlock, Borders, List, ListItem, Paragraph, Tabs, Wrap},
     Terminal,
 };
 
@@ -450,16 +450,11 @@ fn draw_logs(
     app: &App,
     logs: &Arc<Mutex<VecDeque<String>>>,
 ) {
-    frame.render_widget(Clear, area);
-    let visible = logs
-        .lock()
-        .iter()
-        .rev()
-        .take(area.height.saturating_sub(2) as usize)
-        .cloned()
-        .collect::<Vec<_>>();
+    let text = logs.lock().iter().cloned().collect::<Vec<_>>().join("\n");
     frame.render_widget(
-        List::new(visible.into_iter().rev().map(ListItem::new).collect::<Vec<_>>())
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .scroll((app.log_scroll, 0))
             .block(TBlock::default().borders(Borders::ALL).title("logs")),
         area,
     );
