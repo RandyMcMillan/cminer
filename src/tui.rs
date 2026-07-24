@@ -650,7 +650,7 @@ fn peer_rows_sorted(app: &App) -> Vec<PeerRow> {
     let mut rows = Vec::with_capacity(app.peer_rows.len() + 1);
     rows.push(app.self_peer.clone());
     rows.extend(app.peer_rows.values().cloned());
-    rows.sort_by_key(|row| (row.self_node, row.addr));
+    rows.sort_by_key(|row| (if row.self_node { 0u8 } else { 1u8 }, row.addr));
     rows
 }
 
