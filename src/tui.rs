@@ -304,9 +304,10 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
         let running = Arc::clone(&running);
         thread::spawn(move || {
             while running.load(Ordering::Relaxed) {
-                let event = match events.recv() {
+                let event = match events.recv_timeout(Duration::from_millis(250)) {
                     Ok(event) => event,
-                    Err(_) => break,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 };
                 let event_text = event.to_string();
                 push_log(&logs, event_text.clone());
@@ -370,7 +371,12 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                         ..MinerState::default()
                     };
                     let _ = update_tx.send(Update::Miner(state));
-                    let _ = btc::pow::mine_block_with_updates(block, num_cpus::get(), Some(mine_tx.clone()));
+                    let _ = btc::pow::mine_block_with_updates(
+                        block,
+                        num_cpus::get(),
+                        Some(mine_tx.clone()),
+                        Some(Arc::clone(&running)),
+                    );
                     break;
                 }
                 Err(e) => {
@@ -386,9 +392,10 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
         let running = Arc::clone(&running);
         thread::spawn(move || {
             while running.load(Ordering::Relaxed) {
-                let update = match mine_rx.recv() {
+                let update = match mine_rx.recv_timeout(Duration::from_millis(250)) {
                     Ok(update) => update,
-                    Err(_) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 };
                 let _ = update_tx.send(Update::Mine(update));
             }

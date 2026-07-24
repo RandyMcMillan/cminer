@@ -10,6 +10,10 @@ use hex::decode;
 
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use super::proto::{Job, Solution};
 use crate::util::atomic_id;
@@ -227,18 +231,15 @@ impl Computer {
 }
 
 pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
-    mine_block_with_updates(block, workers, None)
+    mine_block_with_updates(block, workers, None, None)
 }
 
 pub fn mine_block_with_updates(
     block: Block,
     workers: usize,
     updates: Option<std::sync::mpsc::Sender<MineUpdate>>,
+    stop: Option<Arc<AtomicBool>>,
 ) -> Option<Block> {
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
     use std::thread;
 
     let workers = workers.max(1);
@@ -266,6 +267,7 @@ pub fn mine_block_with_updates(
         let found = Arc::clone(&found);
         let tx = tx.clone();
         let updates = updates.clone();
+        let stop = stop.clone();
         thread::spawn(move || {
             let mut computer = Computer::new();
             computer.update_block(&block);
@@ -278,7 +280,7 @@ pub fn mine_block_with_updates(
                 });
             }
             info!("worker-{} scanning nonces with stride {}", idx, workers);
-            while !found.load(Ordering::Relaxed) {
+            while !found.load(Ordering::Relaxed) && stop.as_ref().map(|flag| !flag.load(Ordering::Relaxed)).unwrap_or(true) {
                 if let Some(solution) = computer.compute_target(target, nonce) {
                     found.store(true, Ordering::Relaxed);
                     let mut solved = (*block).clone();
@@ -311,7 +313,17 @@ pub fn mine_block_with_updates(
     }
 
     drop(tx);
-    let solved = rx.recv().ok();
+    let solved = loop {
+        if stop.as_ref().map(|flag| flag.load(Ordering::Relaxed)).unwrap_or(false) {
+            found.store(true, Ordering::Relaxed);
+            break None;
+        }
+        match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(block) => break Some(block),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break None,
+        }
+    };
     if let Some(block) = solved.as_ref() {
         if let Some(updates) = updates.as_ref() {
             let _ = updates.send(MineUpdate::Finished {
