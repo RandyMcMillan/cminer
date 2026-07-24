@@ -207,19 +207,20 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
         let logs = Arc::clone(&logs);
         thread::spawn(move || {
             while let Ok(event) = events.recv() {
-                push_log(&logs, event.to_string());
+                let event_text = event.to_string();
+                push_log(&logs, event_text.clone());
 
-                match event {
+                match &event {
                     nakamoto_client::Event::PeerConnected { .. }
                     | nakamoto_client::Event::PeerDisconnected { .. }
                     | nakamoto_client::Event::PeerConnectionFailed { .. }
                     | nakamoto_client::Event::PeerNegotiated { .. } => {
-                        push_log(&logs, format!("peer event: {}", event));
+                        push_log(&logs, format!("peer event: {}", event_text));
                         if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
                             let _ = update_tx.send(Update::Peers(peers));
                         }
                     }
-                    _ => push_log(&logs, format!("{}", event)),
+                    _ => {}
                 }
             }
         });
