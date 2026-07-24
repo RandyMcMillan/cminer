@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     collections::VecDeque,
     io,
     net,
@@ -40,13 +41,13 @@ enum NodeTab {
     Logs,
 }
 
-#[derive(Default)]
 struct App {
     main_tab: MainTab,
     node_tab: NodeTab,
     selected_peer: usize,
     log_scroll: u16,
     node: NodeState,
+    peer_rows: HashMap<net::SocketAddr, PeerRow>,
     miner: MinerState,
 }
 
@@ -62,10 +63,34 @@ impl Default for NodeTab {
     }
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            main_tab: MainTab::Node,
+            node_tab: NodeTab::Peers,
+            selected_peer: 0,
+            log_scroll: 0,
+            node: NodeState::default(),
+            peer_rows: HashMap::new(),
+            miner: MinerState::default(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct NodeState {
     tip: Option<String>,
     peers: Vec<Peer>,
+}
+
+#[derive(Clone)]
+struct PeerRow {
+    addr: net::SocketAddr,
+    link: Option<nakamoto_client::Link>,
+    height: Option<String>,
+    services: Option<ServiceFlags>,
+    user_agent: Option<String>,
+    version: Option<u32>,
 }
 
 #[derive(Clone, Default)]
@@ -83,6 +108,16 @@ struct MinerState {
 enum Update {
     Node(NodeState),
     Peers(Vec<Peer>),
+    PeerConnected(net::SocketAddr, nakamoto_client::Link),
+    PeerNegotiated {
+        addr: net::SocketAddr,
+        link: nakamoto_client::Link,
+        services: ServiceFlags,
+        height: String,
+        user_agent: String,
+        version: u32,
+    },
+    PeerDisconnected(net::SocketAddr),
     Miner(MinerState),
     Mine(btc::pow::MineUpdate),
 }
@@ -199,6 +234,7 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                 }
                 let peer_count = state.peers.len();
                 let _ = update_tx.send(Update::Node(state.clone()));
+                let _ = update_tx.send(Update::Peers(state.peers.clone()));
                 info!("node snapshot updated: {} connected peer(s)", peer_count);
                 thread::sleep(Duration::from_secs(2));
             }
@@ -215,14 +251,42 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                 push_log(&logs, event_text.clone());
 
                 match &event {
+                    nakamoto_client::Event::PeerConnected { addr, link } => {
+                        let _ = update_tx.send(Update::PeerConnected(*addr, *link));
+                        if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
+                            let _ = update_tx.send(Update::Peers(peers));
+                        }
+                    }
+                    nakamoto_client::Event::PeerNegotiated {
+                        addr,
+                        link,
+                        services,
+                        height,
+                        user_agent,
+                        version,
+                        ..
+                    } => {
+                        let _ = update_tx.send(Update::PeerNegotiated {
+                            addr: *addr,
+                            link: *link,
+                            services: *services,
+                            height: height.to_string(),
+                            user_agent: user_agent.clone(),
+                            version: *version,
+                        });
+                    }
+                    nakamoto_client::Event::PeerDisconnected { addr, .. }
+                    | nakamoto_client::Event::PeerConnectionFailed { addr, .. } => {
+                        let _ = update_tx.send(Update::PeerDisconnected(*addr));
+                    }
+                    _ => {}
+                }
+                match &event {
                     nakamoto_client::Event::PeerConnected { .. }
                     | nakamoto_client::Event::PeerDisconnected { .. }
                     | nakamoto_client::Event::PeerConnectionFailed { .. }
                     | nakamoto_client::Event::PeerNegotiated { .. } => {
                         push_log(&logs, format!("peer event: {}", event_text));
-                        if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
-                            let _ = update_tx.send(Update::Peers(peers));
-                        }
                     }
                     _ => {}
                 }
@@ -274,15 +338,49 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
             match update {
                 Update::Node(state) => {
                     app.node = state;
-                    if app.selected_peer >= app.node.peers.len() {
-                        app.selected_peer = app.node.peers.len().saturating_sub(1);
-                    }
                 }
                 Update::Peers(peers) => {
-                    app.node.peers = peers;
-                    if app.selected_peer >= app.node.peers.len() {
-                        app.selected_peer = app.node.peers.len().saturating_sub(1);
-                    }
+                    merge_peer_snapshot(&mut app.peer_rows, peers);
+                    clamp_peer_selection(&mut app);
+                }
+                Update::PeerConnected(addr, link) => {
+                    app.peer_rows
+                        .entry(addr)
+                        .and_modify(|peer| peer.link = Some(link))
+                        .or_insert(PeerRow {
+                            addr,
+                            link: Some(link),
+                            height: None,
+                            services: None,
+                            user_agent: None,
+                            version: None,
+                        });
+                    clamp_peer_selection(&mut app);
+                }
+                Update::PeerNegotiated {
+                    addr,
+                    link,
+                    services,
+                    height,
+                    user_agent,
+                    version,
+                } => {
+                    app.peer_rows.insert(
+                        addr,
+                        PeerRow {
+                            addr,
+                            link: Some(link),
+                            height: Some(height),
+                            services: Some(services),
+                            user_agent: Some(user_agent),
+                            version: Some(version),
+                        },
+                    );
+                    clamp_peer_selection(&mut app);
+                }
+                Update::PeerDisconnected(addr) => {
+                    app.peer_rows.remove(&addr);
+                    clamp_peer_selection(&mut app);
                 }
                 Update::Miner(state) => app.miner = state,
                 Update::Mine(update) => match update {
@@ -326,7 +424,8 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                         app.selected_peer = app.selected_peer.saturating_sub(1);
                     }
                     KeyCode::Down if matches!(app.main_tab, MainTab::Node) && matches!(app.node_tab, NodeTab::Peers) => {
-                        app.selected_peer = app.selected_peer.saturating_add(1).min(app.node.peers.len().saturating_sub(1));
+                        let max = peer_rows_sorted(&app).len().saturating_sub(1);
+                        app.selected_peer = app.selected_peer.saturating_add(1).min(max);
                     }
                     KeyCode::Up if matches!(app.main_tab, MainTab::Node) && matches!(app.node_tab, NodeTab::Logs) => {
                         app.log_scroll = app.log_scroll.saturating_sub(1);
@@ -405,19 +504,20 @@ fn draw_peers(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(area);
 
-    let items = if app.node.peers.is_empty() {
+    let peers = peer_rows_sorted(app);
+    let items = if peers.is_empty() {
         vec![ListItem::new("no peers")]
     } else {
-        app.node
-            .peers
+        peers
             .iter()
             .enumerate()
             .map(|(idx, peer)| {
-                ListItem::new(format!(
-                    "{} {}",
-                    if peer.is_outbound() { "out" } else { "in " },
-                    peer.addr
-                ))
+                let direction = match peer.link {
+                    Some(link) if link.is_outbound() => "out",
+                    Some(_) => "in ",
+                    None => "??",
+                };
+                ListItem::new(format!("{} {}", direction, peer.addr))
                 .style(if idx == app.selected_peer {
                     Style::default().fg(ratatui::style::Color::Black).bg(ratatui::style::Color::White)
                 } else {
@@ -431,20 +531,40 @@ fn draw_peers(frame: &mut Frame<'_>, area: Rect, app: &App) {
         List::new(items).block(
             TBlock::default()
                 .borders(Borders::ALL)
-                .title(format!("peers ({})", app.node.peers.len())),
+                .title(format!("peers ({})", peers.len())),
         ),
         cols[0],
     );
 
-    let text = if let Some(peer) = app.node.peers.get(app.selected_peer) {
+    let text = if let Some(peer) = peers.get(app.selected_peer) {
         vec![
             format!("addr: {}", peer.addr),
-            format!("local: {}", peer.local_addr),
-            format!("link: {:?}", peer.link),
-            format!("height: {}", peer.height),
-            format!("services: {}", peer.services),
-            format!("relay: {}", peer.relay),
-            format!("agent: {}", peer.user_agent),
+            format!(
+                "link: {}",
+                peer
+                    .link
+                    .map(|link| format!("{:?}", link))
+                    .unwrap_or_else(|| "unknown".to_owned())
+            ),
+            format!(
+                "height: {}",
+                peer.height.clone().unwrap_or_else(|| "unknown".to_owned())
+            ),
+            format!(
+                "services: {}",
+                peer
+                    .services
+                    .map(|services| services.to_string())
+                    .unwrap_or_else(|| "unknown".to_owned())
+            ),
+            format!(
+                "version: {}",
+                peer.version.map(|v| v.to_string()).unwrap_or_else(|| "unknown".to_owned())
+            ),
+            format!(
+                "user agent: {}",
+                peer.user_agent.clone().unwrap_or_else(|| "unknown".to_owned())
+            ),
         ]
         .join("\n")
     } else {
@@ -478,6 +598,35 @@ fn push_log(logs: &Arc<Mutex<VecDeque<String>>>, line: impl Into<String>) {
     logs.push_back(sanitize_line(line.into()));
     while logs.len() > 400 {
         logs.pop_front();
+    }
+}
+
+fn merge_peer_snapshot(rows: &mut HashMap<net::SocketAddr, PeerRow>, peers: Vec<Peer>) {
+    for peer in peers {
+        rows.insert(
+            peer.addr,
+            PeerRow {
+                addr: peer.addr,
+                link: Some(peer.link),
+                height: Some(peer.height.to_string()),
+                services: Some(peer.services),
+                user_agent: Some(peer.user_agent),
+                version: None,
+            },
+        );
+    }
+}
+
+fn peer_rows_sorted(app: &App) -> Vec<PeerRow> {
+    let mut rows = app.peer_rows.values().cloned().collect::<Vec<_>>();
+    rows.sort_by_key(|row| row.addr);
+    rows
+}
+
+fn clamp_peer_selection(app: &mut App) {
+    let peers = peer_rows_sorted(app);
+    if app.selected_peer >= peers.len() {
+        app.selected_peer = peers.len().saturating_sub(1);
     }
 }
 
