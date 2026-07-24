@@ -196,7 +196,9 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
             if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
                 state.peers = peers;
             }
+            let peer_count = state.peers.len();
             let _ = update_tx.send(Update::Node(state));
+            info!("node snapshot updated: {} connected peer(s)", peer_count);
             thread::sleep(Duration::from_secs(2));
         });
     }
@@ -419,7 +421,11 @@ fn draw_peers(frame: &mut Frame<'_>, area: Rect, app: &App) {
     };
 
     frame.render_widget(
-        List::new(items).block(TBlock::default().borders(Borders::ALL).title("peers")),
+        List::new(items).block(
+            TBlock::default()
+                .borders(Borders::ALL)
+                .title(format!("peers ({})", app.node.peers.len())),
+        ),
         cols[0],
     );
 
