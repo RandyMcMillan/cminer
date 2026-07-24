@@ -352,6 +352,7 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::default();
+    app.self_peer.addr = config.listen.first().copied().unwrap_or(([0, 0, 0, 0], 0).into());
     loop {
         while let Ok(update) = update_rx.try_recv() {
             match update {
