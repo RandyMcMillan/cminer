@@ -188,18 +188,20 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
     {
         let handle = handle.clone();
         let update_tx = update_tx.clone();
-        thread::spawn(move || loop {
+        thread::spawn(move || {
             let mut state = NodeState::default();
-            if let Ok((height, header)) = handle.get_tip() {
-                state.tip = Some(format!("{} @ {}", height, header.block_hash()));
+            loop {
+                if let Ok((height, header)) = handle.get_tip() {
+                    state.tip = Some(format!("{} @ {}", height, header.block_hash()));
+                }
+                if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
+                    state.peers = peers;
+                }
+                let peer_count = state.peers.len();
+                let _ = update_tx.send(Update::Node(state.clone()));
+                info!("node snapshot updated: {} connected peer(s)", peer_count);
+                thread::sleep(Duration::from_secs(2));
             }
-            if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
-                state.peers = peers;
-            }
-            let peer_count = state.peers.len();
-            let _ = update_tx.send(Update::Node(state));
-            info!("node snapshot updated: {} connected peer(s)", peer_count);
-            thread::sleep(Duration::from_secs(2));
         });
     }
 
@@ -270,7 +272,12 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
     loop {
         while let Ok(update) = update_rx.try_recv() {
             match update {
-                Update::Node(state) => app.node = state,
+                Update::Node(state) => {
+                    app.node = state;
+                    if app.selected_peer >= app.node.peers.len() {
+                        app.selected_peer = app.node.peers.len().saturating_sub(1);
+                    }
+                }
                 Update::Peers(peers) => {
                     app.node.peers = peers;
                     if app.selected_peer >= app.node.peers.len() {
