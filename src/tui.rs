@@ -9,6 +9,7 @@ use std::{
 };
 
 use bitcoin::Block;
+use hex::encode as hex_encode;
 use crossterm::{
     event::{self, Event as CEvent, KeyCode},
     execute,
@@ -687,6 +688,14 @@ fn draw_miner(frame: &mut Frame<'_>, area: Rect, app: &App) {
         lines.push(format!("merkle: {}", block.header.merkle_root));
         lines.push(format!("time: {}", block.header.time));
         lines.push(format!("bits: {}", block.header.bits));
+        if let Some(coinbase) = block.txdata.first() {
+            if let Some(input) = coinbase.input.first() {
+                lines.push(format!("coinbase scriptsig: {}", hex_encode(input.script_sig.as_bytes())));
+            }
+            if let Some(output) = coinbase.output.first() {
+                lines.push(format!("coinbase payout script: {}", hex_encode(output.script_pubkey.as_bytes())));
+            }
+        }
     }
 
     frame.render_widget(
