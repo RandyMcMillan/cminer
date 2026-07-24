@@ -60,6 +60,7 @@ url = "2.2"
 nakamoto = { version = "0.4.0", features = ["nakamoto-node", "nakamoto-test", "nakamoto-wallet"] }
 nakamoto-client = { version = "0.4.0" }
 nakamoto-common = { version = "0.4.0" }
+nakamoto-net-poll = { version = "0.4.0" }
 nakamoto-node = { version = "0.4.0" }
 
 [patch.crates-io]
