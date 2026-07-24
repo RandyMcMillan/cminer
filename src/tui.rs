@@ -3,7 +3,9 @@ use std::{
     collections::VecDeque,
     io,
     net,
+    panic::{self, AssertUnwindSafe},
     sync::{mpsc, Arc},
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::Duration,
 };
@@ -178,6 +180,10 @@ impl Log for BufferLogger {
 
 struct UiGuard;
 
+struct PanicHookGuard {
+    previous: Option<Box<dyn Fn(&panic::PanicHookInfo<'_>) + Sync + Send + 'static>>,
+}
+
 impl UiGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode()?;
@@ -193,10 +199,32 @@ impl Drop for UiGuard {
     }
 }
 
+impl PanicHookGuard {
+    fn install(logs: Arc<Mutex<VecDeque<String>>>) -> Self {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |panic_info| {
+            push_log(&logs, format!("panic: {}", panic_info));
+        }));
+        Self {
+            previous: Some(previous),
+        }
+    }
+}
+
+impl Drop for PanicHookGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            panic::set_hook(previous);
+        }
+    }
+}
+
 pub fn run(config: NakamotoConfig) -> Result<()> {
     let logs = Arc::new(Mutex::new(VecDeque::new()));
     BufferLogger::init(config.log, Arc::clone(&logs))?;
     let self_addr = config.listen.first().copied().unwrap_or(([0, 0, 0, 0], 0).into());
+    let running = Arc::new(AtomicBool::new(true));
+    let _panic_hook = PanicHookGuard::install(Arc::clone(&logs));
 
     let (update_tx, update_rx) = mpsc::channel::<Update>();
     let (mine_tx, mine_rx) = mpsc::channel::<btc::pow::MineUpdate>();
@@ -234,18 +262,26 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
     let handle = client.handle();
     let events = handle.events();
 
-    thread::spawn(move || {
-        if let Err(e) = client.run(node_config) {
-            error!("nakamoto client stopped: {}", e);
-        }
-    });
+    let client_thread = {
+        let running = Arc::clone(&running);
+        thread::spawn(move || {
+            match panic::catch_unwind(AssertUnwindSafe(|| client.run(node_config))) {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => error!("nakamoto client stopped: {}", e),
+                Err(_) => {
+                    running.store(false, Ordering::Relaxed);
+                }
+            }
+        })
+    };
 
-    {
+    let snapshot_thread = {
         let handle = handle.clone();
         let update_tx = update_tx.clone();
+        let running = Arc::clone(&running);
         thread::spawn(move || {
             let mut state = NodeState::default();
-            loop {
+            while running.load(Ordering::Relaxed) {
                 if let Ok((height, header)) = handle.get_tip() {
                     state.tip = Some(format!("{} @ {}", height, header.block_hash()));
                 }
@@ -258,15 +294,20 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                 info!("node snapshot updated: {} connected peer(s)", peer_count);
                 thread::sleep(Duration::from_secs(2));
             }
-        });
-    }
+        })
+    };
 
-    {
+    let events_thread = {
         let handle = handle.clone();
         let update_tx = update_tx.clone();
         let logs = Arc::clone(&logs);
+        let running = Arc::clone(&running);
         thread::spawn(move || {
-            while let Ok(event) = events.recv() {
+            while running.load(Ordering::Relaxed) {
+                let event = match events.recv() {
+                    Ok(event) => event,
+                    Err(_) => break,
+                };
                 let event_text = event.to_string();
                 push_log(&logs, event_text.clone());
 
@@ -311,13 +352,14 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                     _ => {}
                 }
             }
-        });
-    }
+        })
+    };
 
-    {
+    let miner_thread = {
         let handle = handle.clone();
         let update_tx = update_tx.clone();
-        thread::spawn(move || loop {
+        let running = Arc::clone(&running);
+        thread::spawn(move || while running.load(Ordering::Relaxed) {
             match build_candidate_block(&handle) {
                 Ok(block) => {
                     let state = MinerState {
@@ -336,17 +378,22 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
                     thread::sleep(Duration::from_secs(2));
                 }
             }
-        });
-    }
+        })
+    };
 
-    {
+    let mine_forward_thread = {
         let update_tx = update_tx.clone();
+        let running = Arc::clone(&running);
         thread::spawn(move || {
-            while let Ok(update) = mine_rx.recv() {
+            while running.load(Ordering::Relaxed) {
+                let update = match mine_rx.recv() {
+                    Ok(update) => update,
+                    Err(_) => break,
+                };
                 let _ = update_tx.send(Update::Mine(update));
             }
-        });
-    }
+        })
+    };
 
     let _guard = UiGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -430,7 +477,10 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
         if event::poll(Duration::from_millis(100))? {
             if let CEvent::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        running.store(false, Ordering::Relaxed);
+                        break;
+                    }
                     KeyCode::Tab => {
                         app.main_tab = match app.main_tab {
                             MainTab::Node => MainTab::Miner,
@@ -464,7 +514,13 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
         terminal.draw(|frame| draw(frame, &app, &logs))?;
     }
 
+    running.store(false, Ordering::Relaxed);
     let _ = handle.shutdown();
+    let _ = snapshot_thread.join();
+    let _ = events_thread.join();
+    let _ = miner_thread.join();
+    let _ = mine_forward_thread.join();
+    let _ = client_thread.join();
     Ok(())
 }
 
