@@ -196,6 +196,7 @@ impl Drop for UiGuard {
 pub fn run(config: NakamotoConfig) -> Result<()> {
     let logs = Arc::new(Mutex::new(VecDeque::new()));
     BufferLogger::init(config.log, Arc::clone(&logs))?;
+    let self_addr = config.listen.first().copied().unwrap_or(([0, 0, 0, 0], 0).into());
 
     let (update_tx, update_rx) = mpsc::channel::<Update>();
     let (mine_tx, mine_rx) = mpsc::channel::<btc::pow::MineUpdate>();
@@ -352,7 +353,7 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::default();
-    app.self_peer.addr = config.listen.first().copied().unwrap_or(([0, 0, 0, 0], 0).into());
+    app.self_peer.addr = self_addr;
     loop {
         while let Ok(update) = update_rx.try_recv() {
             match update {
