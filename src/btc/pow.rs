@@ -1,6 +1,6 @@
 use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::util::uint::Uint256;
-use bitcoin::BlockHeader;
+use bitcoin::{Block, BlockHeader};
 use bitcoin::Transaction;
 use bitcoin::TxMerkleNode;
 use bitcoin_hashes::sha256d::Hash;
@@ -159,6 +159,15 @@ impl Computer {
     pub fn new() -> Self {
         Self { bytes: [0; 80] }
     }
+    pub fn update_header(&mut self, header: &BlockHeader) {
+        let mut encoder = std::io::Cursor::new(vec![]);
+        header.consensus_encode(&mut encoder).unwrap();
+        let header_bytes = encoder.into_inner();
+        self.bytes.copy_from_slice(header_bytes.as_slice());
+    }
+    pub fn update_block(&mut self, block: &Block) {
+        self.update_header(&block.header);
+    }
     pub fn update(&mut self, job: &Job) {
         let nonce1 = decode(&job.nonce1).unwrap();
         let nonce2 = job.nonce2_bytes();
@@ -179,11 +188,7 @@ impl Computer {
             prev_blockhash: job.prev_hash.into(),
             nonce: 0,
         };
-
-        let mut encoder = std::io::Cursor::new(vec![]);
-        header.consensus_encode(&mut encoder).unwrap();
-        let header_bytes = encoder.into_inner();
-        self.bytes.copy_from_slice(header_bytes.as_slice());
+        self.update_header(&header);
     }
 
     #[inline]
