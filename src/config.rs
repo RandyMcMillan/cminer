@@ -114,6 +114,7 @@ pub struct Cli {
 pub enum Command {
     Miner(Config),
     Nakamoto(NakamotoConfig),
+    Ui(NakamotoConfig),
 }
 
 impl Config {

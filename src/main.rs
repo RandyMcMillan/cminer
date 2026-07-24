@@ -42,6 +42,7 @@ fn main() {
     match cli.command {
         Command::Miner(config) => run_miner(config.fix_workers()),
         Command::Nakamoto(config) => run_nakamoto(config),
+        Command::Ui(config) => run_ui(config),
     }
 }
 
@@ -56,6 +57,7 @@ pub mod ckb;
 pub mod eth;
 pub mod nakamoto;
 pub mod kas;
+pub mod tui;
 
 use crate::config::{Cli, Command, Config, Currency::*, NakamotoConfig};
 use crate::{btc::BtcJob, ckb::CkbJob, eth::EthJob, kas::KasJob};
@@ -146,4 +148,8 @@ fn run_nakamoto(config: NakamotoConfig) {
        );
     }
 
+}
+
+fn run_ui(config: NakamotoConfig) {
+    tui::run(config).expect("run tui");
 }

@@ -155,6 +155,15 @@ pub struct Computer {
     bytes: [u8; 80],
 }
 
+#[derive(Debug, Clone)]
+pub enum MineUpdate {
+    Started { workers: usize, target: Uint256, tx_count: usize },
+    WorkerStarted { worker: usize, stride: usize },
+    Progress { worker: usize, nonce: u32 },
+    Found { worker: usize, nonce: u32, hash: String },
+    Finished { nonce: u32, hash: String },
+}
+
 impl Computer {
     pub fn new() -> Self {
         Self { bytes: [0; 80] }
@@ -218,6 +227,14 @@ impl Computer {
 }
 
 pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
+    mine_block_with_updates(block, workers, None)
+}
+
+pub fn mine_block_with_updates(
+    block: Block,
+    workers: usize,
+    updates: Option<std::sync::mpsc::Sender<MineUpdate>>,
+) -> Option<Block> {
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -230,6 +247,13 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
     let block = Arc::new(block);
     let found = Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel();
+    if let Some(updates) = updates.as_ref() {
+        let _ = updates.send(MineUpdate::Started {
+            workers,
+            target,
+            tx_count,
+        });
+    }
     info!(
         "start block mining: candidate_txs={}, workers={}, target={}",
         tx_count.saturating_sub(1),
@@ -241,16 +265,31 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
         let block = Arc::clone(&block);
         let found = Arc::clone(&found);
         let tx = tx.clone();
+        let updates = updates.clone();
         thread::spawn(move || {
             let mut computer = Computer::new();
             computer.update_block(&block);
             let mut nonce = idx as u32;
+            let mut scanned = 0u32;
+            if let Some(updates) = updates.as_ref() {
+                let _ = updates.send(MineUpdate::WorkerStarted {
+                    worker: idx,
+                    stride: workers,
+                });
+            }
             info!("worker-{} scanning nonces with stride {}", idx, workers);
             while !found.load(Ordering::Relaxed) {
                 if let Some(solution) = computer.compute_target(target, nonce) {
                     found.store(true, Ordering::Relaxed);
                     let mut solved = (*block).clone();
                     solved.header.nonce = solution.nonce;
+                    if let Some(updates) = updates.as_ref() {
+                        let _ = updates.send(MineUpdate::Found {
+                            worker: idx,
+                            nonce: solution.nonce,
+                            hash: solution.target.to_string(),
+                        });
+                    }
                     info!(
                         "worker-{} found candidate nonce={} hash={}",
                         idx,
@@ -260,6 +299,12 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
                     let _ = tx.send(solved);
                     return;
                 }
+                scanned = scanned.wrapping_add(1);
+                if scanned & 0xffff == 0 {
+                    if let Some(updates) = updates.as_ref() {
+                        let _ = updates.send(MineUpdate::Progress { worker: idx, nonce });
+                    }
+                }
                 nonce = nonce.wrapping_add(workers as u32);
             }
         });
@@ -268,6 +313,12 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
     drop(tx);
     let solved = rx.recv().ok();
     if let Some(block) = solved.as_ref() {
+        if let Some(updates) = updates.as_ref() {
+            let _ = updates.send(MineUpdate::Finished {
+                nonce: block.header.nonce,
+                hash: block.block_hash().to_string(),
+            });
+        }
         info!("block mining complete: hash={}, nonce={}", block.block_hash(), block.header.nonce);
     }
     solved
