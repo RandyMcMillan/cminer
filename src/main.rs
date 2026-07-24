@@ -118,6 +118,7 @@ fn run_nakamoto(config: NakamotoConfig) {
     type Reactor = nakamoto_net_poll::Reactor<net::TcpStream>;
 
     let mut node_config = nakamoto_node::Config::new(network);
+    node_config.user_agent = concat!("/Gnostr:", env!("CARGO_PKG_VERSION"), "/");
     node_config.connect = config.connect;
     node_config.listen = if config.listen.is_empty() {
        vec![([0, 0, 0, 0], 0).into()]
