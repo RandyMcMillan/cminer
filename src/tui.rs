@@ -82,6 +82,7 @@ struct MinerState {
 #[derive(Clone)]
 enum Update {
     Node(NodeState),
+    Peers(Vec<Peer>),
     Miner(MinerState),
     Mine(btc::pow::MineUpdate),
 }
@@ -176,6 +177,7 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
 
     let client = nakamoto_node::Client::<Reactor>::new()?;
     let handle = client.handle();
+    let events = handle.events();
 
     thread::spawn(move || {
         if let Err(e) = client.run(node_config) {
@@ -196,6 +198,30 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
             }
             let _ = update_tx.send(Update::Node(state));
             thread::sleep(Duration::from_secs(2));
+        });
+    }
+
+    {
+        let handle = handle.clone();
+        let update_tx = update_tx.clone();
+        let logs = Arc::clone(&logs);
+        thread::spawn(move || {
+            while let Ok(event) = events.recv() {
+                push_log(&logs, event.to_string());
+
+                match event {
+                    nakamoto_client::Event::PeerConnected { .. }
+                    | nakamoto_client::Event::PeerDisconnected { .. }
+                    | nakamoto_client::Event::PeerConnectionFailed { .. }
+                    | nakamoto_client::Event::PeerNegotiated { .. } => {
+                        push_log(&logs, format!("peer event: {}", event));
+                        if let Ok(peers) = handle.get_peers(ServiceFlags::NONE) {
+                            let _ = update_tx.send(Update::Peers(peers));
+                        }
+                    }
+                    _ => push_log(&logs, format!("{}", event)),
+                }
+            }
         });
     }
 
@@ -242,6 +268,12 @@ pub fn run(config: NakamotoConfig) -> Result<()> {
         while let Ok(update) = update_rx.try_recv() {
             match update {
                 Update::Node(state) => app.node = state,
+                Update::Peers(peers) => {
+                    app.node.peers = peers;
+                    if app.selected_peer >= app.node.peers.len() {
+                        app.selected_peer = app.node.peers.len().saturating_sub(1);
+                    }
+                }
                 Update::Miner(state) => app.miner = state,
                 Update::Mine(update) => match update {
                     btc::pow::MineUpdate::Started { workers, .. } => app.miner.workers = workers,
@@ -424,6 +456,19 @@ fn draw_logs(
             .block(TBlock::default().borders(Borders::ALL).title("logs")),
         area,
     );
+}
+
+fn push_log(logs: &Arc<Mutex<VecDeque<String>>>, line: impl Into<String>) {
+    let line = line
+        .into()
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ' || *c == '\t' || *c == ':' || *c == '.' || *c == ',' || *c == '-' || *c == '_' || *c == '/' || *c == '(' || *c == ')')
+        .collect::<String>();
+    let mut logs = logs.lock();
+    logs.push_back(line.into());
+    while logs.len() > 400 {
+        logs.pop_front();
+    }
 }
 
 fn draw_miner(frame: &mut Frame<'_>, area: Rect, app: &App) {
