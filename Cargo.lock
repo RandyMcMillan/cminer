@@ -430,6 +430,7 @@ dependencies = [
  "nakamoto",
  "nakamoto-client",
  "nakamoto-common",
+ "nakamoto-net-poll",
  "nakamoto-node",
  "nonblock-logger",
  "num_cpus",

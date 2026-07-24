@@ -95,6 +95,7 @@ fn run_miner(config: Config) {
 
 fn run_nakamoto(config: NakamotoConfig) {
     nakamoto_logger::init(config.log).expect("initializing logger for the first time");
+    info!("starting in-process nakamoto miner: {:?}", config);
 
     let network = if config.testnet {
         Network::Testnet
@@ -133,11 +134,12 @@ fn run_nakamoto(config: NakamotoConfig) {
     });
 
     let block = crate::nakamoto::build_candidate_block(&handle).expect("build candidate block");
-    println!("candidate block txs: {}", block.txdata.len());
+    info!("candidate block txs: {}", block.txdata.len());
 
+    info!("starting block solve with {} workers", num_cpus::get());
     let found = btc::pow::mine_block(block, num_cpus::get());
     if let Some(solved) = found {
-       println!(
+       info!(
            "mined block {} with nonce {}",
            solved.block_hash(),
            solved.header.nonce

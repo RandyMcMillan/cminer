@@ -130,6 +130,7 @@ impl Run for Worker<EthJob> {
         let mut job_idx = 0;
         let mut nonce = 0.into();
         let mut compute = None;
+        info!("worker-{} starting ETH loop with step {}", self.idx, self.step);
 
         loop {
             let job_idx2 = self.jobsc.get();
@@ -146,6 +147,13 @@ impl Run for Worker<EthJob> {
                 match newjob {
                     EthJob::Compute(c) => {
                         nonce = c.1.nonce + self.idx;
+                        info!(
+                            "worker-{} loaded ETH job: id={}, nonce={}, target={}",
+                            self.idx,
+                            c.1.id,
+                            nonce,
+                            c.1.target
+                        );
                         compute = Some(c);
                     }
                     EthJob::Sleep => compute = None,
@@ -155,6 +163,7 @@ impl Run for Worker<EthJob> {
 
             if let Some((c, j)) = compute.as_ref() {
                 if let Some(s) = c.compute(j, &nonce) {
+                    info!("worker-{} found ETH solution: id={}, nonce={:0x}", self.idx, j.id, nonce);
                     warn!("found a solution: id: {}, nonce: {:0x}, powhash: {}, diff: {}", s.id, nonce, j.powhash, target_to_difficulty(&s.target));
                     make_submit(&s, j).map(|req| self.sender.try_send(Ok(req)).map_err(|e| error!("try send solution error: {:?}", e)).ok());
                     util::sleep_secs(self.sleep);

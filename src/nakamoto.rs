@@ -39,6 +39,12 @@ where
 {
     let (height, tip) = handle.get_tip()?;
     let txs = mempool_snapshot_bitcoin(handle)?;
+    info!(
+        "building candidate block: height={}, mempool_txs={}, prev_hash={}",
+        height + 1,
+        txs.len(),
+        tip.block_hash()
+    );
     let prev_blockhash = BlockHash::from_slice(tip.block_hash().as_inner())?;
     let version = tip.version;
     let bits = tip.bits;
@@ -101,6 +107,12 @@ pub fn build_candidate_block_for(
     if has_witness {
         debug_assert!(block.check_witness_commitment());
     }
+    info!(
+        "candidate block ready: txs={}, witness={}, merkle_root={}",
+        block.txdata.len(),
+        has_witness,
+        block.header.merkle_root
+    );
     block
 }
 
@@ -129,6 +141,27 @@ fn subsidy(height: u32) -> u64 {
     if halvings >= 64 {
         0
     } else {
-        COIN_VALUE >> halvings
+        50 * COIN_VALUE >> halvings
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_candidate_block_with_coinbase_only() {
+        let block = build_candidate_block_for(
+            1,
+            1,
+            BlockHash::default(),
+            1_700_000_000,
+            0x1d00ffff,
+            vec![],
+        );
+
+        assert_eq!(block.txdata.len(), 1);
+        assert!(block.check_merkle_root());
+        assert_eq!(block.txdata[0].output[0].value, 50 * COIN_VALUE);
     }
 }

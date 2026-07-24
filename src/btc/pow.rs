@@ -181,6 +181,14 @@ impl Computer {
         None
     }
     pub fn update(&mut self, job: &Job) {
+        info!(
+            "update mining header: jobid={}, version={}, ntime={}, bits={}, target={}",
+            job.jobid,
+            job.version,
+            job.ntime,
+            job.nbits,
+            job.target
+        );
         let nonce1 = decode(&job.nonce1).unwrap();
         let nonce2 = job.nonce2_bytes();
         let txid = coinbase_for_block(job.coinbase_part1.as_slice(), job.coinbase_part2.as_slice(), nonce1.as_slice(), nonce2.as_slice())
@@ -218,9 +226,16 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
 
     let workers = workers.max(1);
     let target = block.header.target();
+    let tx_count = block.txdata.len();
     let block = Arc::new(block);
     let found = Arc::new(AtomicBool::new(false));
     let (tx, rx) = std::sync::mpsc::channel();
+    info!(
+        "start block mining: candidate_txs={}, workers={}, target={}",
+        tx_count.saturating_sub(1),
+        workers,
+        target
+    );
 
     for idx in 0..workers {
         let block = Arc::clone(&block);
@@ -230,11 +245,18 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
             let mut computer = Computer::new();
             computer.update_block(&block);
             let mut nonce = idx as u32;
+            info!("worker-{} scanning nonces with stride {}", idx, workers);
             while !found.load(Ordering::Relaxed) {
                 if let Some(solution) = computer.compute_target(target, nonce) {
                     found.store(true, Ordering::Relaxed);
                     let mut solved = (*block).clone();
                     solved.header.nonce = solution.nonce;
+                    info!(
+                        "worker-{} found candidate nonce={} hash={}",
+                        idx,
+                        solution.nonce,
+                        solution.target
+                    );
                     let _ = tx.send(solved);
                     return;
                 }
@@ -244,7 +266,11 @@ pub fn mine_block(block: Block, workers: usize) -> Option<Block> {
     }
 
     drop(tx);
-    rx.recv().ok()
+    let solved = rx.recv().ok();
+    if let Some(block) = solved.as_ref() {
+        info!("block mining complete: hash={}, nonce={}", block.block_hash(), block.header.nonce);
+    }
+    solved
 }
 
 #[cfg(any(feature = "btc-openssl"))]

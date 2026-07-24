@@ -173,6 +173,7 @@ impl Run for Worker<BtcJob> {
         let mut job = None;
         let mut nonce = 0u32;
         let mut computer = Computer::new();
+        info!("worker-{} starting BTC loop with step {}", self.idx, self.step);
 
         loop {
             let job_idx2 = self.jobsc.get();
@@ -188,6 +189,13 @@ impl Run for Worker<BtcJob> {
                 match newjob {
                     BtcJob::Compute(mut j) => {
                         j.nonce2 += self.idx as u128;
+                        info!(
+                            "worker-{} loaded BTC job: jobid={}, nonce2={}, target={}",
+                            self.idx,
+                            j.jobid,
+                            j.nonce2,
+                            j.target
+                        );
                         computer.update(&j);
                         job = Some(j);
                         nonce = 0;
@@ -200,6 +208,12 @@ impl Run for Worker<BtcJob> {
 
             if let Some(j) = job.as_mut() {
                 if let Some(solution) = computer.compute(&*j, nonce) {
+                    info!(
+                        "worker-{} found BTC solution: jobid={}, nonce={:0x}",
+                        self.idx,
+                        j.jobid,
+                        solution.nonce
+                    );
                     warn!(
                         "found a solution: id: {}, nonce1&2: {} {:x}, nonce: {:0x}, jobid: {}, diff: {}, target: {}",
                         solution.id,

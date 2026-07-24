@@ -163,6 +163,7 @@ impl Run for Worker<CkbJob> {
         let mut job = None;
         let mut nonce = 0u128;
         let mut computer = Computer::new(self.testnet);
+        info!("worker-{} starting CKB loop with step {}", self.idx, self.step);
 
         loop {
             let job_idx2 = self.jobsc.get();
@@ -178,6 +179,13 @@ impl Run for Worker<CkbJob> {
                 match newjob {
                     CkbJob::Compute(j) => {
                         nonce = j.nonce + self.idx as u128;
+                        info!(
+                            "worker-{} loaded CKB job: jobid={}, nonce={}, target={}",
+                            self.idx,
+                            j.jobid,
+                            nonce,
+                            j.target
+                        );
                         computer.update(&j.powhash);
                         job = Some(j);
                     }
@@ -189,6 +197,7 @@ impl Run for Worker<CkbJob> {
 
             if let Some(j) = job.as_ref() {
                 if let Some(s) = computer.compute(j, nonce) {
+                    info!("worker-{} found CKB solution: jobid={}, nonce={:0x}", self.idx, j.jobid, nonce);
                     warn!("found a solution: id: {}, nonce: {:0x}, jobid: {}, diff: {}", s.id, nonce, j.jobid, target_to_difficulty(&s.target));
                     make_submit(&s, j).map(|req| self.sender.try_send(Ok(req)).map_err(|e| error!("try send solution error: {:?}", e)).ok());
                     util::sleep_secs(self.sleep);
