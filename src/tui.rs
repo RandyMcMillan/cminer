@@ -114,7 +114,7 @@ impl Log for BufferLogger {
         }
 
         let mut logs = self.logs.lock();
-        logs.push_back(format!("{} {} {}", record.level(), record.target(), record.args()));
+        logs.push_back(sanitize_line(format!("{} {} {}", record.level(), record.target(), record.args())));
         while logs.len() > 400 {
             logs.pop_front();
         }
@@ -460,16 +460,43 @@ fn draw_logs(
 }
 
 fn push_log(logs: &Arc<Mutex<VecDeque<String>>>, line: impl Into<String>) {
-    let line = line
-        .into()
-        .chars()
-        .filter(|c| c.is_ascii_graphic() || *c == ' ' || *c == '\t' || *c == ':' || *c == '.' || *c == ',' || *c == '-' || *c == '_' || *c == '/' || *c == '(' || *c == ')')
-        .collect::<String>();
     let mut logs = logs.lock();
-    logs.push_back(line.into());
+    logs.push_back(sanitize_line(line.into()));
     while logs.len() > 400 {
         logs.pop_front();
     }
+}
+
+fn sanitize_line(line: String) -> String {
+    line.chars()
+        .map(|c| {
+            if c.is_ascii_graphic()
+                || c == ' '
+                || c == '\t'
+                || c == ':'
+                || c == '.'
+                || c == ','
+                || c == '-'
+                || c == '_'
+                || c == '/'
+                || c == '('
+                || c == ')'
+                || c == '@'
+                || c == '#'
+                || c == '['
+                || c == ']'
+                || c == '{'
+                || c == '}'
+                || c == '='
+                || c == '<'
+                || c == '>'
+            {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect()
 }
 
 fn draw_miner(frame: &mut Frame<'_>, area: Rect, app: &App) {
