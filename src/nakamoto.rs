@@ -1,15 +1,17 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::convert::TryInto;
 
 use bitcoin::blockdata::constants::COIN_VALUE;
-use bitcoin::blockdata::opcodes::all::OP_TRUE;
 use bitcoin::blockdata::script::{Builder, Script};
 use bitcoin::blockdata::transaction::{OutPoint, TxIn, TxOut};
-use bitcoin::consensus::encode::{deserialize, serialize};
+use bitcoin::consensus::encode::deserialize;
 use bitcoin::hashes::Hash as _;
 use bitcoin::{Block, BlockHeader, BlockHash, Transaction, TxMerkleNode};
 
 use nakamoto_client::handle::Handle;
 use nakamoto_common::block::Transaction as NakamotoTransaction;
+use nakamoto_common::bitcoin::consensus::encode::serialize as common_serialize;
+use nakamoto_common::bitcoin::hashes::Hash as _;
 
 use crate::util::Result;
 
@@ -27,7 +29,7 @@ where
     handle
         .mempool()?
         .into_iter()
-        .map(|tx| Ok(deserialize(&serialize(&tx))?))
+        .map(|tx| Ok(deserialize(&common_serialize(&tx))?))
         .collect()
 }
 
@@ -43,7 +45,7 @@ where
     let time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as u32;
 
     Ok(build_candidate_block_for(
-        height + 1,
+        (height + 1).try_into().expect("block height overflow"),
         version,
         prev_blockhash,
         time,
@@ -117,7 +119,7 @@ fn coinbase_transaction(height: u32, value: u64, has_witness: bool) -> Transacti
         }],
         output: vec![TxOut {
             value,
-            script_pubkey: Builder::new().push_opcode(OP_TRUE).into_script(),
+            script_pubkey: Builder::new().push_int(1).into_script(),
         }],
     }
 }
@@ -127,6 +129,6 @@ fn subsidy(height: u32) -> u64 {
     if halvings >= 64 {
         0
     } else {
-        COIN_VALUE << (0_u32.saturating_sub(halvings) as usize)
+        COIN_VALUE >> halvings
     }
 }
